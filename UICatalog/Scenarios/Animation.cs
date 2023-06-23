@@ -3,13 +3,16 @@ using SixLabors.ImageSharp.ColorSpaces;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using Terminal.Gui;
+using Terminal.Gui.Windows;
 using Attribute = Terminal.Gui.Attribute;
 
 namespace UICatalog.Scenarios {
@@ -53,19 +56,19 @@ namespace UICatalog.Scenarios {
 
 			imageView.SetImage(Image.Load<Rgba32> (File.ReadAllBytes (f.FullName)));
 
-			Task.Run(()=>{
-				while(!isDisposed)
-				{
-					// When updating from a Thread/Task always use Invoke
-					Application.MainLoop.Invoke(()=>
-					{
-						imageView.NextFrame();
-						imageView.SetNeedsDisplay();
-					});
+			//Task.Run(()=>{
+			//	while(!isDisposed)
+			//	{
+			//		// When updating from a Thread/Task always use Invoke
+			//		Application.MainLoop.Invoke(()=>
+			//		{
+			//			imageView.NextFrame();
+			//			imageView.SetNeedsDisplay();
+			//		});
 
-					Task.Delay(100).Wait();
-				}
-			});
+			//		Task.Delay(100).Wait();
+			//	}
+			//});
 		}
 
 		protected override void Dispose(bool disposing)
@@ -135,24 +138,26 @@ namespace UICatalog.Scenarios {
 			}  
 		}
 
-		class ImageView : View {
-			private int frameCount;
-			private int currentFrame = 0;
+		class AnimationRgba32 : Animation<Image<Rgba32>> {
+			public AnimationRgba32 (Image<Rgba32> [] frames, float timeToFullAnimate, Animate animateAction) : base (frames, timeToFullAnimate, animateAction)
+			{
+			}
+		}
 
-			private Image<Rgba32>[] fullResImages;
-			private Image<Rgba32>[] matchSizes;
-			private string[] brailleCache;
+		class ImageView : View {
+
+			AnimationRgba32 animation;
+			private Hashtable brailleCache;
 
 			Rect oldSize = Rect.Empty;
 
 
 			internal void SetImage (Image<Rgba32> image)
 			{
-				frameCount = image.Frames.Count;
+				var frameCount = image.Frames.Count;
 
-				fullResImages = new Image<Rgba32>[frameCount];
-				matchSizes = new Image<Rgba32>[frameCount];
-				brailleCache = new string[frameCount];
+				var fullResImages = new Image<Rgba32>[frameCount];
+				brailleCache = new Hashtable ();
 
 				for(int i=0;i<frameCount-1;i++)
 				{
@@ -160,58 +165,57 @@ namespace UICatalog.Scenarios {
 				}
 				fullResImages[frameCount-1] = image;
 
-				this.SetNeedsDisplay ();
+				animation = new AnimationRgba32 (fullResImages, 2.4f, UpdateBraileFrame);
+				Application.MainLoop.AddIdle (animation.Tick);
+
 			}
-			public void NextFrame()
+
+			private string BraileFrame = string.Empty;
+
+			void UpdateBraileFrame(Image<Rgba32> frame)
 			{
-				currentFrame = (currentFrame+1)%frameCount;
+
+				if (oldSize != this.Bounds) {
+					// Invalidate cached images now size has changed
+					brailleCache.Clear ();
+					oldSize = this.Bounds;
+				}
+
+				if (brailleCache.ContainsKey (frame)) {
+					BraileFrame = brailleCache [frame].ToString ();
+				}else {
+					// keep aspect ratio
+					var newSize = Math.Min (this.Bounds.Width, this.Bounds.Height);
+
+					// generate one
+					var scaledImg = frame.Clone (
+						x => x.Resize (
+								newSize * BitmapToBraille.CHAR_HEIGHT,
+								newSize * BitmapToBraille.CHAR_HEIGHT));
+
+					brailleCache [frame] = BraileFrame = GetBraille (scaledImg);
+				}
+
+
+
+
+				this.SetChildNeedsDisplay ();
+				this.SetNeedsDisplay ();
 			}
 
 			public override void Redraw (Rect bounds)
 			{
 				base.Redraw (bounds);
 
-				if(oldSize != bounds)
-				{
-					// Invalidate cached images now size has changed
-					matchSizes = new Image<Rgba32>[frameCount];
-					brailleCache = new string[frameCount];
-					oldSize = bounds;
-				}
+				var lines = BraileFrame.Split ('\n');
 
-				var imgScaled = matchSizes[currentFrame];
-				var braille = brailleCache[currentFrame];
-
-				if(imgScaled == null)
-				{
-					var imgFull = fullResImages[currentFrame];
-				
-					// keep aspect ratio
-					var newSize = Math.Min(bounds.Width,bounds.Height);
-
-					// generate one
-					matchSizes[currentFrame] = imgScaled = imgFull.Clone (
-						x => x.Resize (
-							 newSize * BitmapToBraille.CHAR_HEIGHT,
-							 newSize * BitmapToBraille.CHAR_HEIGHT));
-				}
-
-				if(braille == null)
-				{
-					brailleCache[currentFrame] = braille = GetBraille(matchSizes[currentFrame]);
-				}
-
-
-				var lines = braille.Split('\n');
-
-				for(int y = 0; y < lines.Length;y++)
-				{
-					var line = lines[y];
-					for(int x = 0;x<line.Length ;x++)
-					{
-						AddRune(x,y,line[x]);
+				for (int y = 0; y < lines.Length; y++) {
+					var line = lines [y];
+					for (int x = 0; x < line.Length; x++) {
+						AddRune (x, y, line [x]);
 					}
 				}
+
 			}
 
 			private string GetBraille (Image<Rgba32> img)

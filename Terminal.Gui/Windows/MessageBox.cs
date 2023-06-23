@@ -1,6 +1,8 @@
 ﻿using NStack;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using Terminal.Gui.Windows;
 
 namespace Terminal.Gui {
 	/// <summary>
@@ -320,6 +322,78 @@ namespace Terminal.Gui {
 				}
 			}
 
+			// Run the modal; do not shutdown the mainloop driver when done
+			Application.Run (d);
+			return Clicked;
+		}
+
+		/// <summary>
+		/// Pop up a loading Dialog, the pop will automatically disappear once the associated Task will be completed.
+		/// </summary>
+		/// <param name="title">Dialog title</param>
+		/// <param name="message">Message showed inside the Dialog</param>
+		/// <param name="task">The task you must wait</param>
+		/// <param name="frames">The collection of frames used for the animation</param>
+		/// <remarks>
+		/// The message box will be vertically and horizontally centered in the container and the size will be automatically determined
+		/// from the size of the title, message. 
+		/// </remarks>
+		public static int LoadingDialog (ustring title, ustring message, Task task, string [] frames)
+			=> LoadingDialog (false, 0, 0, title, message, task, frames);
+
+		static int LoadingDialog (bool useErrorColors, int width, int height, ustring title, ustring message, Task task, string [] frames,
+			Border border = null)
+		{
+			int defaultWidth = 50;
+			if (defaultWidth > Application.Driver.Cols / 2) {
+				defaultWidth = (int)(Application.Driver.Cols * 0.60f);
+			}
+			int maxWidthLine = TextFormatter.MaxWidthLine (message);
+			if (maxWidthLine > Application.Driver.Cols) {
+				maxWidthLine = Application.Driver.Cols;
+			}
+			if (width == 0) {
+				maxWidthLine = Math.Max (maxWidthLine, defaultWidth);
+			} else {
+				maxWidthLine = width;
+			}
+			int textWidth = Math.Min (TextFormatter.MaxWidth (message, maxWidthLine), Application.Driver.Cols);
+			int textHeight = TextFormatter.MaxLines (message, textWidth); // message.Count (ustring.Make ('\n')) + 1;
+			int msgboxHeight = Math.Min (Math.Max (1, textHeight) + 4, Application.Driver.Rows); // textHeight + (top + top padding + buttons + bottom)
+
+			LoadingDialog d = null;
+
+			var payload = new LoadingPayload ();
+			payload.WorkToLoadFor = task;
+			if (message != null) {
+				payload.AnimationToDisplay = new ASCIIAnimation (frames, 1.5f, (a) => d.UpdateLblMessage ($"{a} {message}"));
+			}
+
+			// Create Dialog (retain backwards compat by supporting specifying height/width)
+			if (width == 0 & height == 0) {
+				d = new LoadingDialog (title, payload) {
+					Height = msgboxHeight
+				};
+			} else {
+				d = new LoadingDialog (title, width, Math.Max (height, 4), payload);
+			}
+
+			if (border != null) {
+				d.Border = border;
+			}
+
+			if (useErrorColors) {
+				d.ColorScheme = Colors.Error;
+			}
+
+
+
+			if (width == 0 & height == 0) {
+				// Dynamically size Width
+				d.Width = Math.Min (Math.Max (maxWidthLine, Math.Max (title.ConsoleWidth, Math.Max (textWidth + 2, d.GetButtonsWidth () + d.buttons.Count + 2))), Application.Driver.Cols); // textWidth + (left + padding + padding + right)
+			}
+
+			
 			// Run the modal; do not shutdown the mainloop driver when done
 			Application.Run (d);
 			return Clicked;
